@@ -139,6 +139,7 @@ def test_python_server_endpoints():
     endpoints_to_test = [
         ('GET', '/health', None),
         ('GET', '/', None),
+        ('GET', '/api-keys/status', None),
         ('POST', '/calendar/events', {
             'date': datetime.now().strftime("%Y-%m-%d"),
             'phone_number': 'test_phone'
@@ -163,6 +164,10 @@ def test_python_server_endpoints():
                 print(f"✅ {endpoint} working")
                 if data:
                     print(f"   Response: {json.dumps(response.json(), indent=2)}")
+                elif endpoint == '/api-keys/status':
+                    # Show API key status
+                    result = response.json()
+                    print(f"   API Key Status: {json.dumps(result.get('api_key_status', {}), indent=2)}")
             else:
                 print(f"❌ {endpoint} failed: {response.status_code}")
                 print(f"   Response: {response.text}")
@@ -177,14 +182,21 @@ def test_environment_variables():
     print("\n🔧 Testing Environment Variables...")
     
     required_vars = [
-        'ACI_API_KEY',
         'LINKED_ACCOUNT_OWNER_ID',
         'GEMINI_API_KEY',
         'PYTHON_SERVER_URL'
     ]
     
+    # Check for either separate API keys or fallback
+    api_key_vars = [
+        'ACI_CALENDAR_READER_API_KEY',
+        'ACI_EVENT_CREATOR_API_KEY',
+        'ACI_API_KEY'  # Fallback
+    ]
+    
     missing_vars = []
     
+    # Check required variables
     for var in required_vars:
         value = os.getenv(var)
         if value:
@@ -192,6 +204,21 @@ def test_environment_variables():
         else:
             print(f"❌ {var}: Not set")
             missing_vars.append(var)
+    
+    # Check API keys
+    print("\n🔑 API Key Status:")
+    has_api_key = False
+    for var in api_key_vars:
+        value = os.getenv(var)
+        if value:
+            print(f"✅ {var}: {'*' * len(value)} (length: {len(value)})")
+            has_api_key = True
+        else:
+            print(f"⚠️  {var}: Not set")
+    
+    if not has_api_key:
+        print("❌ No ACI API keys found!")
+        missing_vars.append('ACI_API_KEY (or separate Calendar Reader/Event Creator keys)')
     
     if missing_vars:
         print(f"\n⚠️  Missing environment variables: {missing_vars}")

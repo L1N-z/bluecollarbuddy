@@ -189,16 +189,31 @@ async def health_check():
         # Test environment variables
         required_env_vars = [
             'GEMINI_API_KEY',
-            'ACI_API_KEY',
             'LINKED_ACCOUNT_OWNER_ID'
         ]
         
+        # Check for either separate API keys or fallback
+        api_key_vars = [
+            'ACI_CALENDAR_READER_API_KEY',
+            'ACI_EVENT_CREATOR_API_KEY',
+            'ACI_API_KEY'  # Fallback
+        ]
+        
         missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+        
+        # Check if at least one API key is set
+        has_api_key = any(os.getenv(var) for var in api_key_vars)
+        if not has_api_key:
+            missing_vars.append('ACI_API_KEY (or separate Calendar Reader/Event Creator keys)')
+        
+        # Get API key status from calendar agents
+        api_key_status = calendar_processor.calendar_agents.get_api_key_status()
         
         health_status = {
             "status": "healthy" if not missing_vars else "unhealthy",
             "service": "Blue Collar Buddy API",
             "missing_environment_variables": missing_vars,
+            "api_key_status": api_key_status,
             "endpoints": {
                 "general_messages": "/process-message",
                 "appointment_messages": "/process-appointment",
@@ -214,6 +229,22 @@ async def health_check():
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return {"status": "unhealthy", "error": str(e)}
+
+@app.get("/api-keys/status")
+async def get_api_key_status():
+    """
+    Get API key status for debugging
+    """
+    try:
+        status = calendar_processor.calendar_agents.get_api_key_status()
+        return {
+            "api_key_status": status,
+            "recommendation": "Use separate API keys for better security and control"
+        }
+        
+    except Exception as e:
+        logger.error(f"API key status check failed: {e}")
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     # Check required environment variables

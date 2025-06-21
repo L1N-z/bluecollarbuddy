@@ -6,8 +6,17 @@ from aci import ACI
 
 class AciCalendarAgents:
     def __init__(self):
-        """Initialize ACI calendar agents"""
-        self.aci = ACI(api_key=os.getenv('ACI_API_KEY'))
+        """Initialize ACI calendar agents with separate API keys"""
+        # Initialize separate ACI clients for different agents
+        self.calendar_reader_aci = ACI(api_key=os.getenv('ACI_CALENDAR_READER_API_KEY'))
+        self.event_creator_aci = ACI(api_key=os.getenv('ACI_EVENT_CREATOR_API_KEY'))
+        
+        # Use fallback to single API key if separate keys not provided
+        if not os.getenv('ACI_CALENDAR_READER_API_KEY') and os.getenv('ACI_API_KEY'):
+            self.calendar_reader_aci = ACI(api_key=os.getenv('ACI_API_KEY'))
+        if not os.getenv('ACI_EVENT_CREATOR_API_KEY') and os.getenv('ACI_API_KEY'):
+            self.event_creator_aci = ACI(api_key=os.getenv('ACI_API_KEY'))
+        
         self.linked_account_owner_id = os.getenv('LINKED_ACCOUNT_OWNER_ID')
         
         # Initialize calendar tools
@@ -33,8 +42,8 @@ class AciCalendarAgents:
         try:
             print(f"[DEBUG] Calendar Reader: Checking events for {date}")
             
-            # Search for calendar functions
-            search_result = self.aci.search_functions(
+            # Search for calendar functions using Calendar Reader API key
+            search_result = self.calendar_reader_aci.search_functions(
                 query="calendar events list read",
                 linked_account_owner_id=self.linked_account_owner_id
             )
@@ -49,7 +58,7 @@ class AciCalendarAgents:
             # Execute calendar read function
             calendar_function = search_result['functions'][0]
             
-            execute_result = self.aci.execute_function(
+            execute_result = self.calendar_reader_aci.execute_function(
                 function_name=calendar_function['name'],
                 arguments={
                     "date": date,
@@ -83,8 +92,8 @@ class AciCalendarAgents:
         try:
             print(f"[DEBUG] Calendar Creator: Creating event with details {event_details}")
             
-            # Search for calendar creation functions
-            search_result = self.aci.search_functions(
+            # Search for calendar creation functions using Event Creator API key
+            search_result = self.event_creator_aci.search_functions(
                 query="calendar event create add",
                 linked_account_owner_id=self.linked_account_owner_id
             )
@@ -98,7 +107,7 @@ class AciCalendarAgents:
             # Execute calendar creation function
             create_function = search_result['functions'][0]
             
-            execute_result = self.aci.execute_function(
+            execute_result = self.event_creator_aci.execute_function(
                 function_name=create_function['name'],
                 arguments={
                     "title": event_details.get('title', 'Beehive Consultation'),
@@ -130,7 +139,7 @@ class AciCalendarAgents:
         Check if a proposed date is available and propose alternatives if needed
         """
         try:
-            # Check events on proposed date
+            # Check events on proposed date using Calendar Reader
             events_result = self.get_calendar_events(proposed_date, phone_number)
             
             if not events_result['success']:
@@ -274,10 +283,24 @@ class AciCalendarAgents:
         if phone_number in self.appointment_contexts:
             del self.appointment_contexts[phone_number]
 
+    def get_api_key_status(self) -> Dict[str, Any]:
+        """
+        Get status of API keys for debugging
+        """
+        return {
+            "calendar_reader_api_key": "set" if os.getenv('ACI_CALENDAR_READER_API_KEY') else "not_set",
+            "event_creator_api_key": "set" if os.getenv('ACI_EVENT_CREATOR_API_KEY') else "not_set",
+            "fallback_api_key": "set" if os.getenv('ACI_API_KEY') else "not_set",
+            "linked_account_owner_id": "set" if self.linked_account_owner_id else "not_set"
+        }
+
 # Example usage and testing
 if __name__ == "__main__":
     # Test the calendar agents
     agents = AciCalendarAgents()
+    
+    # Test API key status
+    print(f"API Key Status: {agents.get_api_key_status()}")
     
     # Test calendar reader
     events = agents.get_calendar_events("2025-06-22", "test_phone")

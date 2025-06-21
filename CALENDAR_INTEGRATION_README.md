@@ -119,8 +119,13 @@ const conversationHistory: {
 
 ### Environment Variables
 ```bash
-# ACI.dev Integration
-ACI_API_KEY=your_aci_api_key
+# ACI.dev Integration (separate keys for different agents)
+ACI_CALENDAR_READER_API_KEY=your_calendar_reader_api_key
+ACI_EVENT_CREATOR_API_KEY=your_event_creator_api_key
+
+# Fallback (if you prefer to use a single API key)
+ACI_API_KEY=your_single_aci_api_key
+
 LINKED_ACCOUNT_OWNER_ID=your_linked_account_owner_id
 
 # Gemini AI
@@ -135,6 +140,27 @@ TWILIO_PHONE_NUMBER=your_twilio_whatsapp_number
 PYTHON_SERVER_URL=https://your-python-server.onrender.com
 NEXT_PUBLIC_APP_URL=https://your-vercel-app.vercel.app
 ```
+
+### ACI.dev API Key Configuration
+
+The system supports two API key configuration options:
+
+#### Option 1: Separate API Keys (Recommended)
+- **Calendar Reader Agent**: Uses `ACI_CALENDAR_READER_API_KEY` for reading calendar events
+- **Event Creator Agent**: Uses `ACI_EVENT_CREATOR_API_KEY` for creating calendar events
+
+Benefits:
+- Granular permission control (read-only vs read-write)
+- Separate usage tracking and rate limits
+- Better security isolation
+- Independent agent management
+
+#### Option 2: Single API Key (Fallback)
+- Both agents use `ACI_API_KEY` for all operations
+
+This is simpler but provides less control over permissions and usage tracking.
+
+**Note**: If you set both separate keys and the fallback key, the separate keys will be used.
 
 ### ACI.dev Calendar App Setup
 1. **Add Calendar App**: Configure Google Calendar or Outlook in ACI.dev

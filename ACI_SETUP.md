@@ -31,17 +31,50 @@ Add these environment variables to your deployment:
 
 ### For Vercel (Next.js Frontend)
 ```bash
-ACI_API_KEY=your_aci_api_key_here
+# ACI.dev API Keys (separate keys for different agents)
+ACI_CALENDAR_READER_API_KEY=your_calendar_reader_api_key_here
+ACI_EVENT_CREATOR_API_KEY=your_event_creator_api_key_here
+
+# Fallback (if you prefer to use a single API key)
+ACI_API_KEY=your_single_aci_api_key_here
+
 LINKED_ACCOUNT_OWNER_ID=your_linked_account_owner_id_here
 PYTHON_SERVER_URL=https://your-python-server-url.onrender.com
 ```
 
 ### For Render (Python Backend)
 ```bash
-ACI_API_KEY=your_aci_api_key_here
+# ACI.dev API Keys (separate keys for different agents)
+ACI_CALENDAR_READER_API_KEY=your_calendar_reader_api_key_here
+ACI_EVENT_CREATOR_API_KEY=your_event_creator_api_key_here
+
+# Fallback (if you prefer to use a single API key)
+ACI_API_KEY=your_single_aci_api_key_here
+
 LINKED_ACCOUNT_OWNER_ID=your_linked_account_owner_id_here
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
+
+### API Key Configuration Options
+
+You have two options for configuring ACI API keys:
+
+#### Option 1: Separate API Keys (Recommended)
+- `ACI_CALENDAR_READER_API_KEY`: API key for the Calendar Reader agent
+- `ACI_EVENT_CREATOR_API_KEY`: API key for the Event Creator agent
+
+This allows you to:
+- Use different permissions for reading vs creating events
+- Track usage separately for each agent
+- Apply different rate limits or quotas
+- Maintain better security isolation
+
+#### Option 2: Single API Key (Fallback)
+- `ACI_API_KEY`: Single API key used for both agents
+
+This is simpler but provides less granular control.
+
+**Note**: If you set both separate keys and the fallback key, the separate keys will be used.
 
 ## Step 3: Calendar App Configuration
 
