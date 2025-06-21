@@ -92,29 +92,60 @@ class AciCalendarAgents:
         try:
             print(f"[DEBUG] Calendar Creator: Creating event with details {event_details}")
             
+            # Validate required fields
+            required_fields = ['title', 'date', 'time', 'location']
+            missing_fields = [field for field in required_fields if not event_details.get(field)]
+            
+            if missing_fields:
+                return {
+                    "success": False,
+                    "error": f"Missing required fields: {', '.join(missing_fields)}"
+                }
+            
             # Search for calendar creation functions using Event Creator API key
             search_result = self.event_creator_aci.search_functions(
-                query="calendar event create add",
+                query="google calendar event create add",
                 linked_account_owner_id=self.linked_account_owner_id
             )
             
             if not search_result.get('functions'):
                 return {
                     "success": False,
-                    "error": "No calendar creation functions found"
+                    "error": "No Google Calendar creation functions found"
                 }
             
             # Execute calendar creation function
             create_function = search_result['functions'][0]
             
+            # Prepare event data for Google Calendar
+            event_data = {
+                "summary": event_details.get('title', 'Beehive Consultation with Bob'),
+                "description": event_details.get('description', f'Beehive consultation appointment with {phone_number}'),
+                "start": {
+                    "dateTime": f"{event_details['date']}T{self._convert_time_to_24hr(event_details['time'])}:00",
+                    "timeZone": "America/New_York"  # Default timezone, can be made configurable
+                },
+                "end": {
+                    "dateTime": f"{event_details['date']}T{self._convert_time_to_24hr(event_details['time'], add_hours=1)}:00",
+                    "timeZone": "America/New_York"
+                },
+                "location": event_details.get('location', ''),
+                "attendees": [
+                    {"email": f"{phone_number}@example.com"}  # Placeholder email
+                ],
+                "reminders": {
+                    "useDefault": False,
+                    "overrides": [
+                        {"method": "email", "minutes": 24 * 60},  # 1 day before
+                        {"method": "popup", "minutes": 30}  # 30 minutes before
+                    ]
+                }
+            }
+            
             execute_result = self.event_creator_aci.execute_function(
                 function_name=create_function['name'],
                 arguments={
-                    "title": event_details.get('title', 'Beehive Consultation'),
-                    "date": event_details.get('date'),
-                    "time": event_details.get('time'),
-                    "location": event_details.get('location'),
-                    "description": event_details.get('description', 'Beehive consultation with Bob'),
+                    "event_data": event_data,
                     "linked_account_owner_id": self.linked_account_owner_id
                 }
             )
@@ -124,7 +155,8 @@ class AciCalendarAgents:
             return {
                 "success": True,
                 "event_id": execute_result.get('result', {}).get('id'),
-                "event_details": event_details
+                "event_details": event_details,
+                "google_calendar_data": event_data
             }
             
         except Exception as e:
@@ -133,6 +165,59 @@ class AciCalendarAgents:
                 "success": False,
                 "error": str(e)
             }
+
+    def _convert_time_to_24hr(self, time_str: str, add_hours: int = 0) -> str:
+        """
+        Convert time string to 24-hour format for Google Calendar
+        """
+        import re
+        from datetime import datetime, timedelta
+        
+        # Handle various time formats
+        time_lower = time_str.lower().strip()
+        
+        # Extract hours and minutes
+        time_pattern = r'(\d{1,2}):?(\d{2})?\s*(am|pm)?'
+        match = re.match(time_pattern, time_lower)
+        
+        if match:
+            hours = int(match.group(1))
+            minutes = int(match.group(2)) if match.group(2) else 0
+            period = match.group(3)
+            
+            # Convert to 24-hour format
+            if period == 'pm' and hours != 12:
+                hours += 12
+            elif period == 'am' and hours == 12:
+                hours = 0
+            
+            # Add hours if specified (for end time)
+            if add_hours > 0:
+                time_obj = datetime.now().replace(hour=hours, minute=minutes)
+                time_obj += timedelta(hours=add_hours)
+                hours = time_obj.hour
+                minutes = time_obj.minute
+            
+            return f"{hours:02d}:{minutes:02d}"
+        
+        # Handle natural language times
+        time_map = {
+            'morning': '09:00',
+            'afternoon': '14:00',
+            'evening': '18:00',
+            'night': '20:00'
+        }
+        
+        if time_lower in time_map:
+            base_time = time_map[time_lower]
+            if add_hours > 0:
+                time_obj = datetime.strptime(base_time, "%H:%M")
+                time_obj += timedelta(hours=add_hours)
+                return time_obj.strftime("%H:%M")
+            return base_time
+        
+        # Fallback
+        return "14:00"
 
     def check_availability_and_propose(self, proposed_date: str, phone_number: str) -> Dict[str, Any]:
         """
@@ -318,7 +403,7 @@ class AciCalendarAgents:
 
     def _convert_natural_date(self, natural_date: str) -> str:
         """
-        Convert natural language date to YYYY-MM-DD format
+        Convert natural language date to YYYY-MM-DD format using current date as grounding
         """
         today = datetime.now()
         
@@ -341,6 +426,23 @@ class AciCalendarAgents:
                 
                 if days_ahead <= 0:  # Target day already happened this week
                     days_ahead += 7
+                
+                return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+        elif "this" in natural_date:
+            # Handle "this Tuesday" etc.
+            day_name = natural_date.split()[-1].lower()
+            day_map = {
+                'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+                'friday': 4, 'saturday': 5, 'sunday': 6
+            }
+            
+            if day_name in day_map:
+                target_day = day_map[day_name]
+                current_day = today.weekday()
+                days_ahead = target_day - current_day
+                
+                if days_ahead < 0:  # Target day already happened this week
+                    return None  # Invalid - can't schedule in the past
                 
                 return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
         
@@ -390,6 +492,17 @@ class AciCalendarAgents:
             "event_creator_api_key": "set" if os.getenv('ACI_EVENT_CREATOR_API_KEY') else "not_set",
             "fallback_api_key": "set" if os.getenv('ACI_API_KEY') else "not_set",
             "linked_account_owner_id": "set" if self.linked_account_owner_id else "not_set"
+        }
+
+    def get_current_date_context(self) -> str:
+        """
+        Get current date context for grounding
+        """
+        today = datetime.now()
+        return {
+            "current_date": today.strftime("%Y-%m-%d"),
+            "current_day": today.strftime("%A"),
+            "current_time": today.strftime("%I:%M %p")
         }
 
 # Example usage and testing

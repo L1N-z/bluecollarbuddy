@@ -99,10 +99,14 @@ class GeminiCalendarProcessor:
     def _handle_appointment_scheduling(self, message: str, phone_number: str, conversation_history: List[Dict]) -> Dict[str, Any]:
         """Handle appointment scheduling logic"""
         
+        # Get current date context for grounding
+        current_date_context = self.calendar_agents.get_current_date_context()
+        
         # Extract appointment details from message
         extracted_details = self.calendar_agents.extract_appointment_details(message)
         appointment_context = self.calendar_agents.get_appointment_context(phone_number)
         
+        print(f"[DEBUG] Current date context: {current_date_context}")
         print(f"[DEBUG] Extracted details: {extracted_details}")
         print(f"[DEBUG] Current context: {appointment_context}")
         
@@ -140,7 +144,8 @@ class GeminiCalendarProcessor:
                     availability_result['message'],
                     phone_number,
                     conversation_history,
-                    context_type="availability_check"
+                    context_type="availability_check",
+                    current_date_context=current_date_context
                 )
                 return response
         
@@ -151,8 +156,8 @@ class GeminiCalendarProcessor:
         
         # Check if we have partial details and user is confirming
         if is_confirmation and self._has_partial_appointment_details(appointment_context):
-            print(f"[DEBUG] Partial details with confirmation, creating appointment")
-            return self._create_appointment(phone_number, conversation_history)
+            print(f"[DEBUG] Partial details with confirmation, asking for missing details")
+            return self._ask_for_missing_details(appointment_context, phone_number, conversation_history, current_date_context)
         
         # Generate response to gather missing details
         response = self._generate_response(
@@ -160,7 +165,8 @@ class GeminiCalendarProcessor:
             phone_number,
             conversation_history,
             context_type="appointment_gathering",
-            appointment_context=appointment_context
+            appointment_context=appointment_context,
+            current_date_context=current_date_context
         )
         
         # Update context
@@ -174,15 +180,39 @@ class GeminiCalendarProcessor:
         return all(context.get(field) for field in required_fields)
 
     def _has_partial_appointment_details(self, context: Dict[str, Any]) -> bool:
-        """Check if we have at least date and time (location can be inferred)"""
+        """Check if we have at least some appointment details"""
         has_date = bool(context.get('proposed_date'))
         has_time = bool(context.get('proposed_time'))
+        has_location = bool(context.get('proposed_location'))
         
-        # If we have date and time but no location, use a default location
-        if has_date and has_time and not context.get('proposed_location'):
-            context['proposed_location'] = 'your location'  # Default location
+        return has_date or has_time or has_location
+
+    def _ask_for_missing_details(self, context: Dict[str, Any], phone_number: str, conversation_history: List[Dict], current_date_context: Dict[str, Any]) -> Dict[str, Any]:
+        """Ask user for missing appointment details"""
+        missing_details = []
         
-        return has_date and has_time
+        if not context.get('proposed_date'):
+            missing_details.append('date')
+        if not context.get('proposed_time'):
+            missing_details.append('time')
+        if not context.get('proposed_location'):
+            missing_details.append('location/address')
+        
+        if len(missing_details) == 1:
+            missing_detail = missing_details[0]
+            message = f"I need to know the {missing_detail} for our appointment. Could you please provide that?"
+        else:
+            missing_list = ', '.join(missing_details[:-1]) + f" and {missing_details[-1]}"
+            message = f"I need a few more details: {missing_list}. Could you please provide these?"
+        
+        return self._generate_response(
+            message,
+            phone_number,
+            conversation_history,
+            context_type="missing_details",
+            appointment_context=context,
+            current_date_context=current_date_context
+        )
 
     def _create_appointment(self, phone_number: str, conversation_history: List[Dict]) -> Dict[str, Any]:
         """Create the calendar appointment"""
@@ -267,11 +297,21 @@ Please confirm if these details work for you, and I'll see you there! 🐝"""
         )
 
     def _generate_response(self, message: str, phone_number: str, conversation_history: List[Dict], 
-                          context_type: str = "general", appointment_context: Dict[str, Any] = None) -> Dict[str, Any]:
+                          context_type: str = "general", appointment_context: Dict[str, Any] = None, current_date_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Generate response using Gemini with context"""
         
         # Build system prompt based on context type
         system_prompt = self.bob_persona
+        
+        # Add current date context for grounding
+        if current_date_context:
+            system_prompt += f"""
+
+Current date context for reference:
+- Today is {current_date_context['current_day']}, {current_date_context['current_date']}
+- Current time is {current_date_context['current_time']}
+
+Use this context to interpret ambiguous date/time expressions like "next Tuesday" or "tomorrow"."""
         
         if context_type == "appointment_gathering":
             system_prompt += f"""
@@ -305,6 +345,11 @@ Be enthusiastic and clear about the details. Wait for their confirmation."""
 
 The user has confirmed the appointment. Send a brief, friendly confirmation message."""
         
+        elif context_type == "missing_details":
+            system_prompt += """
+
+The user provided partial details for the appointment. Ask for missing details."""
+        
         # Build conversation for Gemini
         conversation = []
         
@@ -335,7 +380,8 @@ The user has confirmed the appointment. Send a brief, friendly confirmation mess
                 "success": True,
                 "response": response.text,
                 "context_type": context_type,
-                "appointment_context": appointment_context
+                "appointment_context": appointment_context,
+                "current_date_context": current_date_context
             }
             
         except Exception as e:

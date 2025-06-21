@@ -32,6 +32,7 @@ def test_appointment_extraction():
         "They are top bar hives. I live 10 miles away from you",
         "Yes, next Tuesday is fine",
         "No, 2 pm wouldn't work for me. How about 4pm?",
+        "At my house",
         "Yes, sounds good"
     ]
     
@@ -88,12 +89,78 @@ def test_date_conversion():
         "tomorrow",
         "today",
         "next monday",
-        "next friday"
+        "next friday",
+        "this tuesday"
     ]
     
     for date_str in test_dates:
         converted = agents._convert_natural_date(date_str)
         print(f"📅 '{date_str}' -> {converted}")
+
+def test_time_conversion():
+    """Test time conversion to 24-hour format"""
+    print("\n⏰ Testing Time Conversion")
+    print("=" * 50)
+    
+    agents = AciCalendarAgents()
+    
+    test_times = [
+        "4pm",
+        "2:30 PM",
+        "9am",
+        "morning",
+        "afternoon",
+        "evening"
+    ]
+    
+    for time_str in test_times:
+        converted = agents._convert_time_to_24hr(time_str)
+        print(f"⏰ '{time_str}' -> {converted}")
+
+def test_missing_details():
+    """Test missing details handling"""
+    print("\n❓ Testing Missing Details Handling")
+    print("=" * 50)
+    
+    agents = AciCalendarAgents()
+    processor = GeminiCalendarProcessor()
+    
+    # Test scenarios with missing details
+    test_scenarios = [
+        {
+            "message": "Yes, sounds good",
+            "context": {"proposed_date": "2025-06-24", "proposed_time": "4:00 PM"}
+            # Missing location
+        },
+        {
+            "message": "Yes, sounds good", 
+            "context": {"proposed_date": "2025-06-24"}
+            # Missing time and location
+        },
+        {
+            "message": "Yes, sounds good",
+            "context": {}
+            # Missing everything
+        }
+    ]
+    
+    phone_number = "+1234567890"
+    
+    for i, scenario in enumerate(test_scenarios, 1):
+        print(f"\n📝 Scenario {i}: {scenario['message']}")
+        print(f"   Context: {scenario['context']}")
+        
+        # Set context
+        agents.update_appointment_context(phone_number, scenario['context'])
+        
+        # Test processing
+        result = processor.process_message(scenario['message'], phone_number, [])
+        print(f"   Response: {result.get('response', 'No response')}")
+        
+        # Clear context for next test
+        agents.clear_appointment_context(phone_number)
+        
+        print("-" * 30)
 
 if __name__ == "__main__":
     print("🚀 Starting Appointment Extraction Tests")
@@ -101,6 +168,8 @@ if __name__ == "__main__":
     
     test_natural_language_extraction()
     test_date_conversion()
+    test_time_conversion()
+    test_missing_details()
     test_appointment_extraction()
     
     print("\n✅ Tests completed!") 
