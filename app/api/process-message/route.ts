@@ -7,14 +7,17 @@ export async function POST(request: NextRequest) {
     const { message, from } = await request.json()
 
     // Choose processing method based on environment
-    // In production (Vercel), always use Python server
-    // In development, use direct script execution
+    // In production (Vercel), try Python server first, then fallback to TypeScript
     const isProduction = process.env.NODE_ENV === 'production'
     const usePythonServer = isProduction || process.env.USE_PYTHON_SERVER === "true"
+    const useVercelPython = process.env.USE_VERCEL_PYTHON === "true"
     
     let response: string
     
-    if (usePythonServer) {
+    if (useVercelPython) {
+      // Use Vercel's Python runtime (if configured)
+      response = await processMessageWithVercelPython(message, from)
+    } else if (usePythonServer) {
       // Use separate Python server (production)
       response = await processMessageWithPythonServer(message, from)
     } else {
@@ -26,6 +29,18 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("Process message error:", error)
     return NextResponse.json({ error: "Failed to process message" }, { status: 500 })
+  }
+}
+
+async function processMessageWithVercelPython(message: string, from: string): Promise<string> {
+  try {
+    // This would use Vercel's Python runtime if configured
+    // For now, fallback to TypeScript processing
+    console.log(`[DEBUG] Vercel Python not configured, using TypeScript fallback for ${from}`)
+    return processMessageWithTypeScript(message, from)
+  } catch (error) {
+    console.error("Vercel Python processing error:", error)
+    return processMessageWithTypeScript(message, from)
   }
 }
 
@@ -86,6 +101,10 @@ function processMessageWithTypeScript(message: string, from: string): string {
   
   if (lowerMessage.includes('appointment') || lowerMessage.includes('schedule') || lowerMessage.includes('meet')) {
     return "I'd be happy to schedule a consultation! What works better for you - weekday afternoons or weekends? And what's your location so I can confirm I can service your area?"
+  }
+  
+  if (lowerMessage.includes('crack') || lowerMessage.includes('broken') || lowerMessage.includes('repair')) {
+    return "I can definitely help with hive repairs! Cracked walls are common and usually fixable. Can you tell me more about the damage and where you're located? I can come assess it and get it fixed up for you."
   }
   
   // Default response for other messages
