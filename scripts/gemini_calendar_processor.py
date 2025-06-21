@@ -103,6 +103,9 @@ class GeminiCalendarProcessor:
         extracted_details = self.calendar_agents.extract_appointment_details(message)
         appointment_context = self.calendar_agents.get_appointment_context(phone_number)
         
+        print(f"[DEBUG] Extracted details: {extracted_details}")
+        print(f"[DEBUG] Current context: {appointment_context}")
+        
         # Update context with extracted details
         if extracted_details['date']:
             appointment_context['proposed_date'] = extracted_details['date']
@@ -112,8 +115,11 @@ class GeminiCalendarProcessor:
             appointment_context['proposed_location'] = extracted_details['location']
         
         # Check if user is confirming an appointment
-        confirmation_keywords = ['yes', 'confirm', 'okay', 'sounds good', 'perfect', 'that works']
+        confirmation_keywords = ['yes', 'confirm', 'okay', 'sounds good', 'perfect', 'that works', 'sounds great']
         is_confirmation = any(keyword in message.lower() for keyword in confirmation_keywords)
+        
+        print(f"[DEBUG] Is confirmation: {is_confirmation}")
+        print(f"[DEBUG] Pending confirmation: {appointment_context.get('pending_confirmation')}")
         
         if is_confirmation and appointment_context.get('pending_confirmation'):
             return self._confirm_appointment(phone_number, conversation_history)
@@ -140,6 +146,12 @@ class GeminiCalendarProcessor:
         
         # Check if we have all required details for appointment creation
         if self._has_complete_appointment_details(appointment_context):
+            print(f"[DEBUG] All details complete, creating appointment")
+            return self._create_appointment(phone_number, conversation_history)
+        
+        # Check if we have partial details and user is confirming
+        if is_confirmation and self._has_partial_appointment_details(appointment_context):
+            print(f"[DEBUG] Partial details with confirmation, creating appointment")
             return self._create_appointment(phone_number, conversation_history)
         
         # Generate response to gather missing details
@@ -160,6 +172,17 @@ class GeminiCalendarProcessor:
         """Check if we have all required appointment details"""
         required_fields = ['proposed_date', 'proposed_time', 'proposed_location']
         return all(context.get(field) for field in required_fields)
+
+    def _has_partial_appointment_details(self, context: Dict[str, Any]) -> bool:
+        """Check if we have at least date and time (location can be inferred)"""
+        has_date = bool(context.get('proposed_date'))
+        has_time = bool(context.get('proposed_time'))
+        
+        # If we have date and time but no location, use a default location
+        if has_date and has_time and not context.get('proposed_location'):
+            context['proposed_location'] = 'your location'  # Default location
+        
+        return has_date and has_time
 
     def _create_appointment(self, phone_number: str, conversation_history: List[Dict]) -> Dict[str, Any]:
         """Create the calendar appointment"""

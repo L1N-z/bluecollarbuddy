@@ -217,40 +217,95 @@ class AciCalendarAgents:
         
         # Extract date patterns (YYYY-MM-DD, MM/DD/YYYY, etc.)
         import re
+        from datetime import datetime, timedelta
+        
+        # Enhanced date patterns including natural language
         date_patterns = [
             r'\b\d{4}-\d{2}-\d{2}\b',  # YYYY-MM-DD
             r'\b\d{1,2}/\d{1,2}/\d{4}\b',  # MM/DD/YYYY
             r'\b\d{1,2}-\d{1,2}-\d{4}\b',  # MM-DD-YYYY
         ]
         
+        # Check for natural language date expressions
+        natural_date_patterns = [
+            r'\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+            r'\bthis\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
+            r'\btomorrow\b',
+            r'\btoday\b'
+        ]
+        
+        # Try exact date patterns first
         for pattern in date_patterns:
             match = re.search(pattern, message)
             if match:
                 details["date"] = match.group()
                 break
         
-        # Extract time patterns
+        # If no exact date found, try natural language
+        if not details["date"]:
+            for pattern in natural_date_patterns:
+                match = re.search(pattern, message_lower)
+                if match:
+                    natural_date = match.group()
+                    details["date"] = self._convert_natural_date(natural_date)
+                    break
+        
+        # Enhanced time patterns including natural language
         time_patterns = [
             r'\b\d{1,2}:\d{2}\s*(am|pm)?\b',  # HH:MM AM/PM
             r'\b\d{1,2}\s*(am|pm)\b',  # HH AM/PM
         ]
         
+        # Check for natural language time expressions
+        natural_time_patterns = [
+            r'\bmorning\b',
+            r'\bafternoon\b', 
+            r'\bevening\b',
+            r'\bnight\b'
+        ]
+        
+        # Try exact time patterns first
         for pattern in time_patterns:
             match = re.search(pattern, message_lower)
             if match:
                 details["time"] = match.group()
                 break
         
-        # Extract location (simple keyword-based)
-        location_keywords = ['at', 'in', 'location', 'address', 'place']
+        # If no exact time found, try natural language
+        if not details["time"]:
+            for pattern in natural_time_patterns:
+                match = re.search(pattern, message_lower)
+                if match:
+                    natural_time = match.group()
+                    details["time"] = self._convert_natural_time(natural_time)
+                    break
+        
+        # Enhanced location extraction
+        location_keywords = ['at', 'in', 'location', 'address', 'place', 'here', 'there']
         words = message_lower.split()
         
+        # Look for location patterns
         for i, word in enumerate(words):
             if word in location_keywords and i + 1 < len(words):
                 # Extract next few words as location
                 location_parts = words[i+1:i+4]  # Take up to 3 words
                 details["location"] = ' '.join(location_parts)
                 break
+        
+        # If no location found, check for common location patterns
+        if not details["location"]:
+            location_patterns = [
+                r'\bmy\s+(house|home|place)\b',
+                r'\byour\s+(house|home|place|office)\b',
+                r'\bhere\b',
+                r'\bthere\b'
+            ]
+            
+            for pattern in location_patterns:
+                match = re.search(pattern, message_lower)
+                if match:
+                    details["location"] = match.group()
+                    break
         
         # Check if we have all required details
         details["has_all_details"] = all([
@@ -260,6 +315,49 @@ class AciCalendarAgents:
         ])
         
         return details
+
+    def _convert_natural_date(self, natural_date: str) -> str:
+        """
+        Convert natural language date to YYYY-MM-DD format
+        """
+        today = datetime.now()
+        
+        if natural_date == "tomorrow":
+            return (today + timedelta(days=1)).strftime("%Y-%m-%d")
+        elif natural_date == "today":
+            return today.strftime("%Y-%m-%d")
+        elif "next" in natural_date:
+            # Handle "next Tuesday" etc.
+            day_name = natural_date.split()[-1].lower()
+            day_map = {
+                'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+                'friday': 4, 'saturday': 5, 'sunday': 6
+            }
+            
+            if day_name in day_map:
+                target_day = day_map[day_name]
+                current_day = today.weekday()
+                days_ahead = target_day - current_day
+                
+                if days_ahead <= 0:  # Target day already happened this week
+                    days_ahead += 7
+                
+                return (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+        
+        return None
+
+    def _convert_natural_time(self, natural_time: str) -> str:
+        """
+        Convert natural language time to standard format
+        """
+        time_map = {
+            'morning': '9:00 AM',
+            'afternoon': '2:00 PM', 
+            'evening': '6:00 PM',
+            'night': '8:00 PM'
+        }
+        
+        return time_map.get(natural_time, natural_time)
 
     def update_appointment_context(self, phone_number: str, context: Dict[str, Any]):
         """

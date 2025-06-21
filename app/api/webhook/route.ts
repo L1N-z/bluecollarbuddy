@@ -37,6 +37,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       conversationHistory[phoneNumber] = conversationHistory[phoneNumber].slice(-10);
     }
 
+    console.log(`[DEBUG] Conversation history for ${phoneNumber}:`, conversationHistory[phoneNumber]);
+
     // Process message with conversation history
     const processResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/process-message`, {
       method: 'POST',
@@ -57,6 +59,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const processResult = await processResponse.json();
+    console.log(`[DEBUG] Process result for ${phoneNumber}:`, processResult);
+    
     const response = processResult.response || "I'm sorry, I didn't understand that. Could you please rephrase?";
 
     // Add assistant response to history
