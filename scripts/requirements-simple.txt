@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+google-generativeai
+requests
+python-dotenv 

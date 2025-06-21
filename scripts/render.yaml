@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: whatsapp-ai-server
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn python_server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PYTHON_SERVER_PORT
+        value: 8000 
