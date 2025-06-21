@@ -40,15 +40,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.log(`[DEBUG] Conversation history for ${phoneNumber}:`, conversationHistory[phoneNumber]);
 
     // Process message with conversation history
-    const processResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/process-message`, {
+    const processResponse = await fetch(`${process.env.PYTHON_SERVER_URL}/process-message`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         message: body,
-        phoneNumber: phoneNumber,
-        conversationHistory: conversationHistory[phoneNumber].slice(0, -1) // Exclude current message
+        phone_number: phoneNumber,
+        conversation_history: conversationHistory[phoneNumber].slice(0, -1) // Exclude current message
       }),
     });
 
