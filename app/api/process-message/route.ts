@@ -2,34 +2,123 @@ import { type NextRequest, NextResponse } from "next/server"
 import { spawn } from "child_process"
 import path from "path"
 
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const { message, from } = await request.json()
+    const body = await request.json()
+    const { message, phoneNumber, conversationHistory = [] } = body
 
-    // Choose processing method based on environment
-    // In production (Vercel), try Python server first, then fallback to TypeScript
-    const isProduction = process.env.NODE_ENV === 'production'
-    const usePythonServer = isProduction || process.env.USE_PYTHON_SERVER === "true"
-    const useVercelPython = process.env.USE_VERCEL_PYTHON === "true"
-    
-    let response: string
-    
-    if (useVercelPython) {
-      // Use Vercel's Python runtime (if configured)
-      response = await processMessageWithVercelPython(message, from)
-    } else if (usePythonServer) {
-      // Use separate Python server (production)
-      response = await processMessageWithPythonServer(message, from)
-    } else {
-      // Use direct Python script execution (development only)
-      response = await processMessageWithPythonScript(message, from)
+    if (!message || !phoneNumber) {
+      return NextResponse.json(
+        { error: 'Message and phone number are required' },
+        { status: 400 }
+      )
     }
 
-    return NextResponse.json({ response })
+    console.log(`[DEBUG] Processing message from ${phoneNumber}: ${message}`)
+
+    // Check if message is appointment-related
+    const appointmentKeywords = [
+      'appointment', 'meet', 'schedule', 'booking', 'consultation',
+      'visit', 'come by', 'see you', 'available', 'free time',
+      'when can', 'what time', 'where to meet'
+    ]
+
+    const messageLower = message.toLowerCase()
+    const isAppointmentRelated = appointmentKeywords.some(keyword => 
+      messageLower.includes(keyword)
+    )
+
+    // Check for date/time/location patterns
+    const hasDateTimeLocation = checkForDateTimeLocation(message)
+
+    // Get current appointment context
+    const contextResponse = await fetch(`${process.env.PYTHON_SERVER_URL}/calendar/context/${phoneNumber}`)
+    const contextData = await contextResponse.json()
+    const hasExistingContext = Object.keys(contextData.context || {}).length > 0
+
+    let response
+    let endpoint
+
+    if (isAppointmentRelated || hasDateTimeLocation || hasExistingContext) {
+      // Use appointment processor
+      endpoint = '/process-appointment'
+      console.log(`[DEBUG] Using appointment processor for ${phoneNumber}`)
+    } else {
+      // Use general message processor
+      endpoint = '/process-message'
+      console.log(`[DEBUG] Using general processor for ${phoneNumber}`)
+    }
+
+    // Call Python server
+    const pythonResponse = await fetch(`${process.env.PYTHON_SERVER_URL}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message,
+        phone_number: phoneNumber,
+        conversation_history: conversationHistory
+      }),
+    })
+
+    if (!pythonResponse.ok) {
+      console.error(`[ERROR] Python server error: ${pythonResponse.status} ${pythonResponse.statusText}`)
+      
+      // Fallback response
+      return NextResponse.json({
+        response: "I'm having trouble processing your message right now. Could you try again?",
+        success: false,
+        error: 'Python server unavailable'
+      })
+    }
+
+    response = await pythonResponse.json()
+    console.log(`[DEBUG] Response for ${phoneNumber}: ${response.response}`)
+
+    return NextResponse.json(response)
   } catch (error) {
-    console.error("Process message error:", error)
-    return NextResponse.json({ error: "Failed to process message" }, { status: 500 })
+    console.error(`[ERROR] Failed to process message: ${error}`)
+    return NextResponse.json(
+      { 
+        response: "I'm having trouble processing your message right now. Could you try again?",
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      },
+      { status: 500 }
+    )
   }
+}
+
+function checkForDateTimeLocation(message: string): boolean {
+  const messageLower = message.toLowerCase()
+  
+  // Date patterns
+  const datePatterns = [
+    /\b\d{4}-\d{2}-\d{2}\b/,  // YYYY-MM-DD
+    /\b\d{1,2}\/\d{1,2}\/\d{4}\b/,  // MM/DD/YYYY
+    /\b\d{1,2}-\d{1,2}-\d{4}\b/,  // MM-DD-YYYY
+    /\btoday\b/, /\btomorrow\b/, /\bnext week\b/
+  ]
+  
+  // Time patterns
+  const timePatterns = [
+    /\b\d{1,2}:\d{2}\s*(am|pm)?\b/,  // HH:MM AM/PM
+    /\b\d{1,2}\s*(am|pm)\b/,  // HH AM/PM
+    /\bmorning\b/, /\bafternoon\b/, /\bevening\b/
+  ]
+  
+  // Location patterns
+  const locationPatterns = [
+    /\bat\b/, /\bin\b/, /\blocation\b/, /\baddress\b/, /\bplace\b/,
+    /\bhouse\b/, /\boffice\b/, /\bhome\b/
+  ]
+  
+  const hasDate = datePatterns.some(pattern => pattern.test(messageLower))
+  const hasTime = timePatterns.some(pattern => pattern.test(messageLower))
+  const hasLocation = locationPatterns.some(pattern => pattern.test(messageLower))
+  
+  return hasDate || hasTime || hasLocation
 }
 
 async function processMessageWithVercelPython(message: string, from: string): Promise<string> {

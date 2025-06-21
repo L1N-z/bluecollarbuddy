@@ -1,119 +1,95 @@
-import { type NextRequest, NextResponse } from "next/server"
-import twilio from "twilio"
+import { NextRequest, NextResponse } from 'next/server';
+import { sendWhatsAppMessage } from '@/lib/twilio';
 
-// Initialize Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID!,
-  process.env.TWILIO_AUTH_TOKEN!
-)
+// In-memory conversation history (in production, use a database)
+const conversationHistory: { [phoneNumber: string]: Array<{ role: 'user' | 'assistant', content: string, timestamp: Date }> } = {};
 
-// Store message timestamps to handle batching
-const messageTimestamps = new Map<string, number>()
-
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const formData = await request.formData()
+    const formData = await request.formData();
+    const from = formData.get('From') as string;
+    const body = formData.get('Body') as string;
+    const messageId = formData.get('MessageSid') as string;
 
-    // Extract Twilio webhook data
-    const messageData = {
-      MessageSid: formData.get("MessageSid"),
-      From: formData.get("From"),
-      To: formData.get("To"),
-      Body: formData.get("Body"),
-      NumMedia: formData.get("NumMedia"),
-      ProfileName: formData.get("ProfileName"),
+    console.log(`[DEBUG] Webhook received from ${from}: ${body}`);
+
+    if (!from || !body) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    console.log("Received WhatsApp message:", messageData)
+    // Clean phone number (remove 'whatsapp:' prefix)
+    const phoneNumber = from.replace('whatsapp:', '');
 
-    const from = messageData.From as string
-    const body = messageData.Body as string
-
-    // Check if this is a quick follow-up message (within 20 seconds)
-    const now = Date.now()
-    const lastMessageTime = messageTimestamps.get(from) || 0
-    const timeDiff = now - lastMessageTime
-
-    messageTimestamps.set(from, now)
-
-    // If it's a quick follow-up (within 20 seconds), don't send immediate response
-    // The batching logic in gemini-chat will handle it
-    if (timeDiff < 20000 && lastMessageTime > 0) {
-      console.log(`Quick follow-up message from ${from}, batching...`)
-
-      // Still process for batching but don't send immediate response
-      await processMessage(body, from)
-
-      // Return empty TwiML to avoid duplicate responses
-      return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
-        headers: { "Content-Type": "text/xml" },
-      })
+    // Get conversation history for this phone number
+    if (!conversationHistory[phoneNumber]) {
+      conversationHistory[phoneNumber] = [];
     }
 
-    // Process the message and get response
-    const processedResponse = await processMessage(body, from)
+    // Add user message to history
+    conversationHistory[phoneNumber].push({
+      role: 'user',
+      content: body,
+      timestamp: new Date()
+    });
 
-    // Send the response back via Twilio WhatsApp API
-    try {
-      await twilioClient.messages.create({
-        body: processedResponse,
-        from: process.env.TWILIO_PHONE_NUMBER!, // Your Twilio WhatsApp number
-        to: from, // The user's WhatsApp number
-      })
-
-      console.log(`✅ Response sent to ${from}: ${processedResponse}`)
-    } catch (twilioError) {
-      console.error("Twilio send error:", twilioError)
-      // Fallback to TwiML if Twilio API fails
-      const twimlResponse = `<?xml version="1.0" encoding="UTF-8"?>
-      <Response>
-        <Message>
-          <Body>${processedResponse}</Body>
-        </Message>
-      </Response>`
-
-      return new NextResponse(twimlResponse, {
-        headers: { "Content-Type": "text/xml" },
-      })
+    // Keep only last 10 messages to prevent memory issues
+    if (conversationHistory[phoneNumber].length > 10) {
+      conversationHistory[phoneNumber] = conversationHistory[phoneNumber].slice(-10);
     }
 
-    // Return empty TwiML since we sent the message via API
-    return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`, {
-      headers: { "Content-Type": "text/xml" },
-    })
+    // Process message with conversation history
+    const processResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/process-message`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: body,
+        phoneNumber: phoneNumber,
+        conversationHistory: conversationHistory[phoneNumber].slice(0, -1) // Exclude current message
+      }),
+    });
+
+    if (!processResponse.ok) {
+      console.error(`[ERROR] Process message failed: ${processResponse.status}`);
+      await sendWhatsAppMessage(phoneNumber, "I'm having trouble processing your message right now. Could you try again?");
+      return NextResponse.json({ error: 'Failed to process message' }, { status: 500 });
+    }
+
+    const processResult = await processResponse.json();
+    const response = processResult.response || "I'm sorry, I didn't understand that. Could you please rephrase?";
+
+    // Add assistant response to history
+    conversationHistory[phoneNumber].push({
+      role: 'assistant',
+      content: response,
+      timestamp: new Date()
+    });
+
+    // Send WhatsApp response
+    await sendWhatsAppMessage(phoneNumber, response);
+
+    console.log(`[DEBUG] Response sent to ${phoneNumber}: ${response}`);
+
+    return NextResponse.json({ success: true });
+
   } catch (error) {
-    console.error("Webhook error:", error)
-
-    // Return a friendly error message as TwiML
-    const errorResponse = `<?xml version="1.0" encoding="UTF-8"?>
-    <Response>
-      <Message>
-        <Body>Hey, this is Bob! I'm having some technical trouble right now. Could you try sending your message again in a moment?</Body>
-      </Message>
-    </Response>`
-
-    return new NextResponse(errorResponse, {
-      headers: { "Content-Type": "text/xml" },
-    })
+    console.error(`[ERROR] Webhook processing failed: ${error}`);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-async function processMessage(message: string, from: string): Promise<string> {
-  try {
-    const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"}/api/process-message`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, from }),
-    })
+export async function GET(request: NextRequest): Promise<NextResponse> {
+  // Handle webhook verification for Twilio
+  const url = new URL(request.url);
+  const mode = url.searchParams.get('hub.mode');
+  const token = url.searchParams.get('hub.verify_token');
+  const challenge = url.searchParams.get('hub.challenge');
 
-    if (!response.ok) {
-      throw new Error(`Processing API error: ${response.statusText}`)
-    }
-
-    const result = await response.json()
-    return result.response
-  } catch (error) {
-    console.error("Message processing error:", error)
-    return "Hey, this is Bob! I'm having a bit of trouble with my system right now, but I'd love to help you with your beehive needs. Could you try again in a moment?"
+  if (mode === 'subscribe' && token === process.env.TWILIO_WEBHOOK_VERIFY_TOKEN) {
+    console.log('[DEBUG] Webhook verified successfully');
+    return new NextResponse(challenge, { status: 200 });
   }
+
+  return NextResponse.json({ error: 'Invalid verification token' }, { status: 403 });
 }
