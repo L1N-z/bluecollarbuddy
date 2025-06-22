@@ -9,10 +9,15 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
     "@google/generative-ai": "^0.21.0",
+    "@mui/material": "^7.1.2",
     "@radix-ui/react-tabs": "^1.0.4",
+    "@supabase/supabase-js": "^2.50.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.0.0",
+    "framer-motion": "^12.18.1",
     "lucide-react": "^0.263.1",
     "next": "14.0.0",
     "react": "^18",
