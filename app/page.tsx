@@ -206,7 +206,7 @@ export default function BobDashboard() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">
-            🐝 Bob's Beehive Dashboard
+            Busy Body&apos;s Best Buddy
           </h1>
           <p className="text-gray-600">Manage your beehive consultation business</p>
         </div>
