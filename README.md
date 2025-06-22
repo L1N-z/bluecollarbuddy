@@ -21,7 +21,7 @@ The client initiates a conversation and requests an appointment.
 
 | Initiating Contact                                     | Scheduling the Appointment                               |
 | ------------------------------------------------------ | -------------------------------------------------------- |
-| ![Conversation Start](./docs/images/conversation-1.png) | ![Conversation Booking](./docs/images/conversation-2.png) |
+| ![Conversation Start](./docs/images/conversation-1.jpg) | ![Conversation Booking](./docs/images/conversation-2.jpg) |
 
 ### 2. The Result: Automated Calendar Entry
 
@@ -29,7 +29,7 @@ The agent confirms the details and creates the event in Google Calendar without 
 
 | Calendar Before                                        | Calendar After                                         |
 | ------------------------------------------------------ | ------------------------------------------------------ |
-| ![Calendar Before](./docs/images/calendar-before.png)   | ![Calendar After](./docs/images/calendar-after.png)     |
+| ![Calendar Before](./docs/images/calendar-before.jpg)   | ![Calendar After](./docs/images/calendar-after.jpg)     |
 
 ## Tech Stack
 
