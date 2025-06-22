@@ -252,6 +252,17 @@ class GeminiCalendarProcessor:
             # Check if response contains appointment-related content
             response_text = response.text.strip()
             
+            # Check for PAUSE response (for pricing discussions)
+            if "PAUSE" in response_text.upper():
+                return {
+                    "response": "PAUSE",
+                    "message": "Pricing discussion requires Bob's direct intervention. Please wait for Bob to respond.",
+                    "pause_required": True,
+                    "is_greeting": False,
+                    "timestamp": datetime.now().isoformat(),
+                    "phone_number": phone_number
+                }
+            
             # Extract any appointment details from the response
             extracted_details = self.event_creator.extract_appointment_details(response_text, phone_number)
             

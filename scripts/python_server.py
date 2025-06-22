@@ -1,11 +1,13 @@
 import os
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import json
 import logging
+from datetime import datetime
+import asyncio
 
 # Import our processors
 from gemini_message_processor import GeminiMessageProcessor
@@ -31,6 +33,17 @@ app.add_middleware(
 gemini_processor = GeminiMessageProcessor()
 calendar_processor = GeminiCalendarProcessor()
 
+# Store Bob's settings
+bob_account = None
+agent_settings = {
+    "enabled": True,
+    "delayTime": 5,
+    "defaultGreeting": ""
+}
+
+# Store conversation history
+conversation_history = {}
+
 class MessageRequest(BaseModel):
     message: str
     phone_number: str
@@ -49,6 +62,10 @@ class EventCreationRequest(BaseModel):
     event_details: Dict[str, Any]
     phone_number: str
 
+class SettingsUpdate(BaseModel):
+    bobAccount: Optional[Dict[str, Any]] = None
+    agentSettings: Optional[Dict[str, Any]] = None
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
@@ -60,15 +77,57 @@ async def process_message(request: MessageRequest):
     Process general messages using the original Gemini processor
     """
     try:
-        logger.info(f"Processing message for {request.phone_number}: {request.message[:50]}...")
+        # Check if agent is enabled
+        if not agent_settings.get("enabled", True):
+            return {
+                "response": "Agent is currently disabled. Please enable it in the dashboard.",
+                "agent_disabled": True
+            }
         
+        # Apply delay if configured
+        delay_time = agent_settings.get("delayTime", 5)
+        if delay_time > 0:
+            await asyncio.sleep(delay_time)
+        
+        # Get conversation history
+        history = conversation_history.get(request.phone_number, [])
+        if request.conversation_history:
+            history = request.conversation_history
+        
+        # Process the message
         result = gemini_processor.process_message(
             request.message,
             request.phone_number,
-            request.conversation_history or []
+            history
         )
         
-        logger.info(f"Message processed successfully for {request.phone_number}")
+        # Update conversation history
+        if request.phone_number not in conversation_history:
+            conversation_history[request.phone_number] = []
+        
+        conversation_history[request.phone_number].append({
+            "role": "user",
+            "content": request.message,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        conversation_history[request.phone_number].append({
+            "role": "assistant",
+            "content": result.get("response", ""),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Keep only last 20 messages
+        conversation_history[request.phone_number] = conversation_history[request.phone_number][-20:]
+        
+        # Check if response should be paused (for pricing discussions)
+        if result.get("response") == "PAUSE":
+            return {
+                "response": "PAUSE",
+                "message": "Pricing discussion requires Bob's direct intervention. Please wait for Bob to respond.",
+                "pause_required": True
+            }
+        
         return result
         
     except Exception as e:
@@ -245,6 +304,155 @@ async def get_api_key_status():
     except Exception as e:
         logger.error(f"API key status check failed: {e}")
         return {"error": str(e)}
+
+@app.post("/update-settings")
+async def update_settings(request: SettingsUpdate):
+    """Update Bob's account and agent settings"""
+    global bob_account, agent_settings
+    
+    try:
+        if request.bobAccount is not None:
+            bob_account = request.bobAccount
+            print(f"Updated Bob's account settings: {bob_account}")
+        
+        if request.agentSettings is not None:
+            agent_settings = request.agentSettings
+            print(f"Updated agent settings: {agent_settings}")
+        
+        return {"message": "Settings updated successfully"}
+        
+    except Exception as e:
+        print(f"Error updating settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/settings")
+async def get_settings():
+    """Get current settings"""
+    return {
+        "bobAccount": bob_account,
+        "agentSettings": agent_settings
+    }
+
+@app.get("/conversations")
+async def get_conversations():
+    """Get all conversation histories"""
+    return conversation_history
+
+@app.get("/conversations/{phone_number}")
+async def get_conversation(phone_number: str):
+    """Get conversation history for a specific phone number"""
+    return {
+        "phone_number": phone_number,
+        "history": conversation_history.get(phone_number, [])
+    }
+
+@app.delete("/conversations/{phone_number}")
+async def clear_conversation(phone_number: str):
+    """Clear conversation history for a specific phone number"""
+    if phone_number in conversation_history:
+        del conversation_history[phone_number]
+    return {"message": "Conversation cleared"}
+
+@app.post("/generate-prompt")
+async def generate_prompt(request: MessageRequest):
+    """Generate a prompt using Bob's settings"""
+    try:
+        # Create enhanced prompt with Bob's settings
+        prompt = create_enhanced_prompt(request.message, request.phone_number)
+        
+        return {
+            "prompt": prompt,
+            "bob_account": bob_account,
+            "agent_settings": agent_settings
+        }
+        
+    except Exception as e:
+        print(f"Error generating prompt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+def create_enhanced_prompt(message: str, phone_number: str) -> str:
+    """Create an enhanced prompt using Bob's account and agent settings"""
+    
+    # Base prompt
+    prompt = f"""
+You are Bob, a friendly beehive builder and consultant. You help people with beehive construction, maintenance, and beekeeping advice.
+
+CURRENT CONTEXT (for date/time grounding):
+- Today is {datetime.now().strftime('%A, %B %d, %Y')}
+- Current time is {datetime.now().strftime('%H:%M')} (24-hour format)
+- Current year is {datetime.now().strftime('%Y')}
+
+USER MESSAGE: {message}
+"""
+    
+    # Add Bob's account information if available
+    if bob_account:
+        prompt += f"""
+
+BOB'S PROFILE:
+- Name: {bob_account.get('name', 'Bob')}
+- Role: {bob_account.get('role', 'Beehive Builder & Consultant')}
+- Profile: {bob_account.get('profile', 'Experienced beehive builder and consultant')}
+- Location: {bob_account.get('location', 'UK')}
+"""
+        
+        # Add services information
+        services_type = bob_account.get('servicesType', 'none')
+        if services_type == 'pricing':
+            services = bob_account.get('services', [])
+            if services:
+                prompt += "\nSERVICES AND PRICING:\n"
+                for service in services:
+                    if service.get('name'):
+                        price = service.get('price', 0)
+                        prompt += f"- {service['name']}: £{price}\n"
+        elif services_type == 'list':
+            services = bob_account.get('services', [])
+            if services:
+                prompt += "\nSERVICES PROVIDED:\n"
+                for service in services:
+                    if service.get('name'):
+                        prompt += f"- {service['name']}\n"
+        elif services_type == 'none':
+            prompt += "\nSERVICES: Discussed individually with clients (no fixed pricing)\n"
+        
+        # Add services not provided
+        services_not_provided = bob_account.get('servicesNotProvided', '')
+        if services_not_provided:
+            prompt += f"\nSERVICES NOT PROVIDED: {services_not_provided}\n"
+    
+    # Add agent settings
+    if agent_settings:
+        prompt += f"""
+
+AGENT SETTINGS:
+- Enabled: {agent_settings.get('enabled', True)}
+- Delay Time: {agent_settings.get('delayTime', 5)} seconds
+- Default Greeting: {agent_settings.get('defaultGreeting', '')}
+"""
+    
+    # Add instructions
+    prompt += """
+
+INSTRUCTIONS:
+1. Always use absolute dates (YYYY-MM-DD) and times (HH:MM 24-hour format) when discussing appointments
+2. If the user mentions relative times like "tomorrow" or "next Monday", convert them to absolute dates
+3. For appointment scheduling, you need ALL of these details:
+   - Client's full name
+   - Exact date (YYYY-MM-DD format)
+   - Exact time (HH:MM 24-hour format)
+   - Complete location/address with postcode
+4. If any details are missing, ask the user to provide them
+5. Default appointment duration is 1 hour
+6. Once all details are confirmed, create the appointment in Google Calendar
+7. Be friendly and professional, always confirming details clearly
+8. If services type is 'none' and user asks about pricing, respond with "PAUSE" to allow Bob to intervene
+9. Use Bob's profile and services information to provide personalized responses
+
+Respond naturally as Bob, helping with beehive-related questions or gathering appointment details.
+"""
+    
+    return prompt
 
 if __name__ == "__main__":
     # Check required environment variables
